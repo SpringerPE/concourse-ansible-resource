@@ -1,0 +1,382 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+"""
+Concourse out resource
+"""
+# Python 2 and 3 compatibility
+from __future__ import unicode_literals, print_function
+
+import sys
+import os
+import time
+
+from collections import namedtuple, defaultdict
+from tempfile import NamedTemporaryFile
+try:
+    # Python 3.x
+    from io import StringIO
+except ImportError:
+    # Python 2.x
+    from StringIO import StringIO
+
+from resource import Resource
+
+# Future: from ansible.inventory.manager import InventoryManager
+from ansible.inventory import Inventory
+from ansible.parsing.dataloader import DataLoader
+from ansible.vars import VariableManager
+from ansible.utils.display import Display
+from ansible.executor.playbook_executor import PlaybookExecutor
+from ansible.executor.task_queue_manager import TaskQueueManager
+from ansible.playbook import Playbook
+from ansible.errors import AnsibleError
+# from ansible.executor.stats import AggregateStats
+
+
+
+class AnsiblePlaybook(Resource):
+    """Concourse resource implementation for ansible-playbook"""
+    DEFAULTS = {
+        'listtags': False,
+        'listtasks': False,
+        'listhosts': False,
+        'syntax': False,
+        'connection': None,
+        'module_path': None,
+        'forks': None,
+        'remote_user': None,
+        'private_key_file': None,
+        'ssh_common_args': None,
+        'ssh_extra_args': None,
+        'sftp_extra_args': None,
+        'scp_extra_args': None,
+        'become': None,
+        'become_method': None,
+        'become_user': None,
+        'verbosity': 0,
+        'check': 0,
+    }
+    SOURCE = {
+        "private_key_file": str,
+        "remote_user": str,
+        "remote_pass": str,
+        "vault_password": str,
+        "extra_vars": dict,
+        "inventory": None,
+        "become": bool,
+        "become_method": str,
+        "become_user": str,
+        "become_pass": str,
+        "ssh_common_args": str,
+        "forks": int,
+        "tags": list,
+        "skip_tags": list,
+    }
+    PARAMS = {
+        "playbook": str,
+        "extra_vars": dict,
+        "inventory": None,
+        "become": bool,
+        "become_method": str,
+        "become_user": str,
+        "connection": str,
+        "timeout": int,
+        "ssh_common_args": str,
+        "verbosity": int,
+        "force_handlers": bool,
+        "forks": int,
+        "tags": list,
+        "skip_tags": list,
+    }
+
+
+    def __init__(self, *args, **kwargs):
+        super(AnsiblePlaybook, self).__init__(*args, **kwargs)
+
+
+    def _get_config_param(self, data, params={}):
+        config = {}
+        for p in params.keys():
+            value = data.get(p)
+            if value:
+                value_type = params[p]
+                if value_type is bool:
+                    config[p] = str(value).lower() in ["true", "1", "yes", "y"]
+                elif value_type is None:
+                    config[p] = value
+                else:
+                    try:
+                        config[p] = value_type(value)
+                    except ValueError as e:
+                        msg = "Cannot get config param '%s': %s" % (p, str(e))
+                        self.logger.error(msg)
+        return config
+
+
+    def _dynamic_inventory_group(self, name, data_group, output):
+        print("[%s]" % name, file=output)
+        if isinstance(data_group, dict):
+            if "hosts" in data_group:
+                for host in data_group['hosts']:
+                    if isinstance(host, list):
+                        print(" ".join(host), file=output)
+                    else:
+                        print(host, file=output)
+            print(file=output)
+            if "vars" in data_group:
+                print("[%s:vars]" % name, file=output)
+                variables = data_group['vars']
+                try:
+                    for v in variables.keys():
+                        print("%s='%s'" % (v, variables[v]), file=output)
+                    print(file=output)
+                except Exception as e:
+                    msg = "Inventory vars exception %s: '%s'" % (name, str(e))
+                    self.logger.error(msg)
+                print(file=output)
+            if "children" in data_group:
+                print("[%s:children]" % name, file=output)
+                for children in data_group['children']:
+                    print(children, file=output)
+                print(file=output)
+        elif isinstance(data_group, list):
+            for host in data_group:
+                if isinstance(host, list):
+                    print(" ".join(host), file=output)
+                else:
+                    print(host, file=output)
+            print(file=output)
+        else:
+            print(data_group, file=output)
+            print(file=output)
+        print(file=output)
+
+
+    def inventory(self, data, path, inventory_file="000000.ini"):
+        output = StringIO()
+        if isinstance(data, dict):
+            # inventory is (json) dictionary as specified in
+            # http://docs.ansible.com/ansible/latest/dev_guide/developing_inventory.html
+            self.logger.debug("Processing json inventory: '%s'" % repr(data))
+            groups_children = [
+                 g for g in data.keys()
+                    if isinstance(data[g],dict) and 'children' in data[g]
+            ]
+            groups_leaf = [
+                g for g in data.keys()
+                    if g not in groups_children
+            ]
+            for group in groups_children:
+                self._dynamic_inventory_group(group, data[group], output)
+            for group in groups_leaf:
+                self._dynamic_inventory_group(group, data[group], output)
+        elif isinstance(data, list):
+            # inventory is a list of hosts
+            self.logger.debug("Processing list inventory: '%s'" % repr(data))
+            for host in data:
+                if isinstance(host, list):
+                    print(" ".join(host), file=output)
+                else:
+                    print(host, file=output)
+        else:
+            # inventory is something like "localhost"
+            msg = "Processing simple str inventory: '%s'" % repr(data)
+            self.logger.debug(msg)
+            print(data, file=output)
+        content = output.getvalue()
+        inventory_path = os.path.join(path, inventory_file)
+        try:
+            with open(inventory_path, 'w') as f:
+                f.write(content)
+        except Exception as e:
+            msg = "Cannot write inventory '%s': %s" % (inventory_path, str(e))
+            self.logger.error(msg)
+            raise
+        else:
+            output.close()
+        return content
+
+
+    def configure(self, workfolder, source, params):
+        config = self._get_config_param(source, self.SOURCE)
+        config_params = self._get_config_param(params, self.PARAMS)
+        config.update(config_params)
+        extra_vars = config.get("extra_vars", {})
+        extra_vars.update(source.get("extra_vars", {}))
+        config['extra_vars'] = extra_vars
+        # private key
+        private_key_path = None
+        private_key = source.get("private_key")
+        if private_key:
+            try:
+                tmp_file = NamedTemporaryFile(delete=False, suffix='.key')
+                private_key_path = tmp_file.name
+                with open(private_key_path, 'w') as f:
+                    f.write(private_key)
+            except Exception as e:
+                msg = "Cannot create private key file: %s" % (str(e))
+                self.logger.error(msg)
+                raise
+        # inventory path
+        inventory_path = source.get("inventory_path", "inventory")
+        inventory_path = params.get("inventory_path", inventory_path)
+        inventory_path = os.path.join(workfolder, inventory_path)
+        if not os.path.exists(inventory_path):
+            try:
+                os.makedirs(inventory_path)
+            except Exception as e:
+                msg = "Cannot create inventory folder '%s': %s" % (inventory_path, str(e))
+                self.logger.error(msg)
+                raise
+        # process the inventory
+        inventory = config.get('inventory', {})
+        inventory.update(source.get("inventory", {}))
+        hosts = inventory.get("hosts", "localhost")
+        # Fixme! avoid overwriting
+        inventory_exec = inventory.get("executable")
+        #group_vars = inventory.get("group_vars")
+        #host_vars = inventory.get("host_vars")
+        if inventory_exec:
+            config['inventory'] = inventory_exec
+        else:
+            self.inventory(hosts, inventory_path, "0.ini")
+            config['inventory'] = inventory_path
+        # playbook path
+        playbook_path = params.get("playbook", "playbook.yml")
+        playbook_path = os.path.join(workfolder, playbook_path)
+        if not os.path.isfile(playbook_path):
+            msg = "Cannot find playbook file '%s'" % (playbook_path)
+            self.logger.error(msg)
+            raise ValueError(msg)
+        config['playbook'] = playbook_path
+        return config
+
+
+    def run_playbook(self, config, playbook_path, inventory_path,
+                     vault_password=None, become_password=None, remote_pass=None,
+                     verbose=0, extra_vars=None, host_vars=None, group_vars=None):
+        rcode = 0
+        # Set global verbosity
+        PlaybookExecutor.verbosity = verbose
+        # Gets data from YAML/JSON files
+        loader = DataLoader()
+        if vault_password:
+            loader.set_vault_password(vault_password)
+        # Future! (for new versions, not released)
+        #inventory = InventoryManager(loader, inventory_path)
+        #variable_manager = VariableManager(loader=loader, inventory=inventory)
+        # For now
+        variable_manager = VariableManager()
+        inventory = Inventory(loader, variable_manager, inventory_path)
+        variable_manager.set_inventory(inventory)
+        if extra_vars:
+            variable_manager.extra_vars = extra_vars
+        if host_vars:
+            variable_manager.host_vars_files = host_vars
+        if group_vars:
+            variable_manager.group_vars_files = group_vars
+        # Convert dicitionary to namedtuple 'Options'
+        options_all = dict(self.DEFAULTS)
+        options_all.update(config)
+        #del options_all['private_key_file']
+        #del options_all['module_path']
+        options = namedtuple('Options', options_all.keys())(**options_all)
+        passwords = {}
+        if become_password is not None:
+            passwords['become_pass'] = become_password
+        if remote_pass is not None:
+            passwords['conn_pass'] = remote_pass
+        self.logger.info("Running playbook '%s': %s" % (playbook_path, options))
+        # Setup playbook executor, but don't run until run() called
+        playbook = PlaybookExecutor(
+            playbooks = [playbook_path], 
+            inventory = inventory, 
+            variable_manager = variable_manager,
+            loader = loader, 
+            options = options, 
+            passwords = passwords
+        )
+        # Results of PlaybookExecutor
+        stdout = ""
+        try:
+            stdout = playbook.run()
+        except AnsibleError as e:
+            msg = "Error running playbook '%s': %s" % (playbook_path, str(e))
+            self.logger.error(msg)
+            rcode = 1
+        stats = playbook._tqm._stats
+        return rcode, stdout, stats
+
+
+    def summarize(self, stats):
+        failed = []
+        unreachable = []
+        hosts = stats.processed.keys()
+        for h in hosts:
+            s = stats.summarize(h)
+            if s["failures"] > 0:
+                failed.append(h)
+            if s["unreachable"] > 0:
+                unreachable.append(h)
+        result = {
+            "hosts_all": hosts,
+            "hosts_failed": failed,
+            "hosts_unreachable": unreachable,
+            "processed": stats.processed,
+            "failures": stats.failures,
+            "ok": stats.ok,
+            "dark": stats.dark,
+            "changed": stats.changed,
+            "skipped": stats.skipped
+        }
+        self.logger.info("Playbook summary: %s" % (result))
+        return result
+
+
+    def metadata(self, rcode, result):
+        if rcode == 0:
+            statuscode = 0
+            if len(result.get("failed", [])) > 0:
+                statuscode = 2
+            if len(result.get("unreachable", [])) > 0:
+                statuscode = 3
+        else:
+            statuscode = rcode
+        metadata = []
+        for k in result.keys():
+            metadata.append({"name": str(k), "value": str(result[k]) })
+        metadata.append({"name": "statuscode", "value": str(statuscode) })
+        return metadata
+
+
+    def update(self, folder, source, params):
+        config = self.configure(folder, source, params)
+        playbook_path = config["playbook"]
+        inventory_path = config["inventory"]
+        verbose = config.get("verbosity", 0)
+        vault_pass = config.get("vault_password")
+        become_pass = config.get("become_pass")
+        remote_pass = config.get("remote_pass")
+        extra_vars = config.get("extra_vars")
+        host_vars = None
+        group_vars = None
+        rcode, stdout, stats = self.run_playbook(
+            config, playbook_path, inventory_path, vault_pass,
+            become_pass, remote_pass, verbose, extra_vars, host_vars, group_vars)
+        result = self.summarize(stats)
+        metadata = self.metadata(rcode, result)
+        timestamp = time.time()
+        version = { "timestamp": str(timestamp) }
+        rvalue = { "version": version, "metadata": metadata }
+        return rcode, rvalue
+
+
+if __name__ == '__main__':
+    r = AnsiblePlaybook()
+    try:
+        rcode = r.run(os.path.basename(__file__))
+    except Exception as e:
+        sys.stderr.write("ERROR: " + str(e) + "\n")
+        sys.exit(1)
+    sys.exit(rcode)
+

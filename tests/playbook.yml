@@ -1,0 +1,14 @@
+---
+- name: Test
+  hosts: localhost
+  gather_facts: true
+ 
+  tasks:
+  - name: ping1
+    ping:
+
+  - name: Display all variables/facts known for a host
+    debug: var=hostvars[inventory_hostname]
+
+  - name: ping2
+    ping:

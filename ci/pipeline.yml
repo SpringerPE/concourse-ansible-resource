@@ -1,0 +1,28 @@
+---
+resources:
+- name: repository-source
+  type: git
+  source:
+    uri: git@github.com:SpringerPE/concourse-ansible-resource.git
+    branch: master
+
+- name: task-docker-image
+  type: docker-image
+  source:
+    email: {{docker-hub-email}}
+    username: {{docker-hub-username}}
+    password: {{docker-hub-password}}
+    repository: platformengineering/concourse-ansible-resource
+
+
+jobs:
+- name: job-build-task-docker-image
+  public: true
+  serial: true
+  plan:
+  - get: repository-source
+    trigger: true
+  - put: task-docker-image
+    params:
+      build: platformengineering/concourse-ansible-resource
+
