@@ -1,0 +1,41 @@
+---
+resources:
+- name: repository-concourse-ansible-resource
+  type: git
+  source:
+    uri: https://github.com/SpringerPE/concourse-ansible-resource.git
+    branch: master
+
+- name: task-docker-image
+  type: docker-image
+  source:
+    email: {{docker-hub-email}}
+    username: {{docker-hub-username}}
+    password: {{docker-hub-password}}
+    repository: platformengineering/concourse-ansible-resource
+
+jobs:
+- name: job-build-task-docker-image
+  public: true
+  serial: true
+  plan:
+  - get: repository-concourse-ansible-resource
+    trigger: true
+  - put: task-docker-image
+
+- name: job-test-task-docker-image
+  public: true
+  serial: true
+  plan:
+  - aggregate:
+    - get: task-docker-image
+      passed: [job-build-task-docker-image]
+      trigger: true
+    - get: src
+      resource: repository-concourse-ansible-resource
+      trigger: false
+  - task: test-run-ansible-setup
+    file: src/ci/tasks/test_ansible-setup.yml
+  - task: test-run-ansible-playbook-version
+    file: src/ci/tasks/test_ansible-playbook-version.yml
+

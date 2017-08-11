@@ -1,0 +1,14 @@
+---
+platform: linux
+
+image_resource:
+  type: docker-image
+  source:
+    repository: platformengineering/concourse-ansible-resource
+    tag: "latest"
+
+run:
+  path: ansible-playbook
+  args:
+  - --version
+
