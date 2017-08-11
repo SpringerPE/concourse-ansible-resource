@@ -22,6 +22,9 @@ jobs:
   - get: repository-concourse-ansible-resource
     trigger: true
   - put: task-docker-image
+    params:
+      build: repository-concourse-ansible-resource
+
 
 - name: job-test-task-docker-image
   public: true
