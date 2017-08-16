@@ -57,12 +57,13 @@ class AnsiblePlaybook(Resource):
         'check': 0,
     }
     SOURCE = {
+        # private_key
         "private_key_file": str,
         "remote_user": str,
         "remote_pass": str,
         "vault_password": str,
         "extra_vars": dict,
-        "inventory": None,
+        "inventory": dict,
         "become": bool,
         "become_method": str,
         "become_user": str,
@@ -73,9 +74,10 @@ class AnsiblePlaybook(Resource):
         "skip_tags": list,
     }
     PARAMS = {
+        # playbook
         "playbook": str,
         "extra_vars": dict,
-        "inventory": None,
+        "inventory": dict,
         "become": bool,
         "become_method": str,
         "become_user": str,
@@ -88,6 +90,9 @@ class AnsiblePlaybook(Resource):
         "tags": list,
         "skip_tags": list,
     }
+    DEFAULT_INVENTORY_FILE="inventory.ini"
+    DEFAULT_INVENTORY_PATH="inventory"
+
 
 
     def __init__(self, *args, **kwargs):
@@ -113,46 +118,49 @@ class AnsiblePlaybook(Resource):
         return config
 
 
-    def _dynamic_inventory_group(self, name, data_group, output):
+    def _hosts_group(self, name, data_group, output):
+        """It Processes a inventory group. It can be a host (string),
+        a list of hosts (list of strings) or a dictionary.
+        """
         print("[%s]" % name, file=output)
         if isinstance(data_group, dict):
             if "hosts" in data_group:
                 for host in data_group['hosts']:
                     if isinstance(host, list):
-                        print(" ".join(host), file=output)
+                        print(' '.join(host), file=output)
                     else:
                         print(host, file=output)
-            print(file=output)
+            print('', file=output)
             if "vars" in data_group:
                 print("[%s:vars]" % name, file=output)
                 variables = data_group['vars']
                 try:
                     for v in variables.keys():
                         print("%s='%s'" % (v, variables[v]), file=output)
-                    print(file=output)
+                    print('', file=output)
                 except Exception as e:
                     msg = "Inventory vars exception %s: '%s'" % (name, str(e))
                     self.logger.error(msg)
-                print(file=output)
+                print('', file=output)
             if "children" in data_group:
                 print("[%s:children]" % name, file=output)
                 for children in data_group['children']:
                     print(children, file=output)
-                print(file=output)
+                print('', file=output)
         elif isinstance(data_group, list):
             for host in data_group:
                 if isinstance(host, list):
-                    print(" ".join(host), file=output)
+                    print(' '.join(host), file=output)
                 else:
                     print(host, file=output)
-            print(file=output)
+            print('', file=output)
         else:
             print(data_group, file=output)
-            print(file=output)
-        print(file=output)
+            print('', file=output)
+        print('', file=output)
 
 
-    def inventory(self, data, path, inventory_file="000000.ini"):
+    def hosts(self, data, path, hosts_file):
         output = StringIO()
         if isinstance(data, dict):
             # inventory is (json) dictionary as specified in
@@ -167,15 +175,15 @@ class AnsiblePlaybook(Resource):
                     if g not in groups_children
             ]
             for group in groups_children:
-                self._dynamic_inventory_group(group, data[group], output)
+                self._hosts_group(group, data[group], output)
             for group in groups_leaf:
-                self._dynamic_inventory_group(group, data[group], output)
+                self._hosts_group(group, data[group], output)
         elif isinstance(data, list):
             # inventory is a list of hosts
             self.logger.debug("Processing list inventory: '%s'" % repr(data))
             for host in data:
                 if isinstance(host, list):
-                    print(" ".join(host), file=output)
+                    print(' '.join(host), file=output)
                 else:
                     print(host, file=output)
         else:
@@ -184,7 +192,7 @@ class AnsiblePlaybook(Resource):
             self.logger.debug(msg)
             print(data, file=output)
         content = output.getvalue()
-        inventory_path = os.path.join(path, inventory_file)
+        inventory_path = os.path.join(path, hosts_file)
         try:
             with open(inventory_path, 'w') as f:
                 f.write(content)
@@ -197,14 +205,51 @@ class AnsiblePlaybook(Resource):
         return content
 
 
+    def inventory(self, workfolder, source, params):
+        output = None
+        inventory = source.get('inventory', {})
+        # Fixme! avoid overwriting
+        inventory.update(params.get("inventory", {}))
+        hosts = inventory.get("hosts", "localhost")
+        inventory_path = inventory.get("path", self.DEFAULT_INVENTORY_PATH)
+        inventory_file = inventory.get("file")
+        inventory_exec = inventory.get("executable")
+        # TODO
+        group_vars = inventory.get("group_vars")
+        host_vars = inventory.get("host_vars")
+        if inventory_exec:
+            # dynamic inventory executable
+            output = inventory_exec
+        else:
+            inventory_path = os.path.join(workfolder, inventory_path)
+            if not os.path.exists(inventory_path):
+                try:
+                    os.makedirs(inventory_path)
+                except Exception as e:
+                    msg = "Cannot create inventory folder '%s': %s" % (inventory_path, str(e))
+                    self.logger.error(msg)
+                    raise
+            if inventory_file:
+                # Inventory is pointing directly to the ini file
+                output =  os.path.join(inventory_path, inventory_file)
+            else:
+                # Inventory is the full path
+                # Just create a inventory file
+                inventory_file = self.DEFAULT_INVENTORY_FILE
+                output = inventory_path
+            self.hosts(hosts, inventory_path, inventory_file)
+        return output
+
+
     def configure(self, workfolder, source, params):
         config = self._get_config_param(source, self.SOURCE)
         config_params = self._get_config_param(params, self.PARAMS)
         config.update(config_params)
+        # Extra vars (just a dictionary)
         extra_vars = config.get("extra_vars", {})
         extra_vars.update(source.get("extra_vars", {}))
         config['extra_vars'] = extra_vars
-        # private key
+        # Private key
         private_key_path = None
         private_key = source.get("private_key")
         if private_key:
@@ -217,31 +262,9 @@ class AnsiblePlaybook(Resource):
                 msg = "Cannot create private key file: %s" % (str(e))
                 self.logger.error(msg)
                 raise
-        # inventory path
-        inventory_path = source.get("inventory_path", "inventory")
-        inventory_path = params.get("inventory_path", inventory_path)
-        inventory_path = os.path.join(workfolder, inventory_path)
-        if not os.path.exists(inventory_path):
-            try:
-                os.makedirs(inventory_path)
-            except Exception as e:
-                msg = "Cannot create inventory folder '%s': %s" % (inventory_path, str(e))
-                self.logger.error(msg)
-                raise
-        # process the inventory
-        inventory = config.get('inventory', {})
-        inventory.update(source.get("inventory", {}))
-        hosts = inventory.get("hosts", "localhost")
-        # Fixme! avoid overwriting
-        inventory_exec = inventory.get("executable")
-        #group_vars = inventory.get("group_vars")
-        #host_vars = inventory.get("host_vars")
-        if inventory_exec:
-            config['inventory'] = inventory_exec
-        else:
-            self.inventory(hosts, inventory_path, "0.ini")
-            config['inventory'] = inventory_path
-        # playbook path
+        # Inventory
+        config['inventory'] = self.inventory(workfolder, source, params)
+        # Playbook path
         playbook_path = params.get("playbook", "playbook.yml")
         playbook_path = os.path.join(workfolder, playbook_path)
         if not os.path.isfile(playbook_path):
@@ -262,10 +285,10 @@ class AnsiblePlaybook(Resource):
         loader = DataLoader()
         if vault_password:
             loader.set_vault_password(vault_password)
-        # Future! (for new versions, not released)
+        # Future! (for new ansible versions, not yet released)
         #inventory = InventoryManager(loader, inventory_path)
         #variable_manager = VariableManager(loader=loader, inventory=inventory)
-        # For now
+        # For ansible 2.3.x
         variable_manager = VariableManager()
         inventory = Inventory(loader, variable_manager, inventory_path)
         variable_manager.set_inventory(inventory)
@@ -376,6 +399,7 @@ if __name__ == '__main__':
     try:
         rcode = r.run(os.path.basename(__file__))
     except Exception as e:
+        raise
         sys.stderr.write("ERROR: " + str(e) + "\n")
         sys.exit(1)
     sys.exit(rcode)
