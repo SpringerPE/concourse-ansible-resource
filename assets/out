@@ -364,9 +364,9 @@ class AnsiblePlaybook(Resource):
     def metadata(self, rcode, result):
         if rcode == 0:
             statuscode = 0
-            if len(result.get("failed", [])) > 0:
+            if len(result.get("hosts_failed", [])) > 0:
                 statuscode = 2
-            if len(result.get("unreachable", [])) > 0:
+            if len(result.get("hosts_unreachable", [])) > 0:
                 statuscode = 3
         else:
             statuscode = rcode
@@ -374,7 +374,7 @@ class AnsiblePlaybook(Resource):
         for k in result.keys():
             metadata.append({"name": str(k), "value": str(result[k]) })
         metadata.append({"name": "statuscode", "value": str(statuscode) })
-        return metadata
+        return statuscode, metadata
 
 
     def update(self, folder, source, params):
@@ -388,11 +388,11 @@ class AnsiblePlaybook(Resource):
         extra_vars = config.get("extra_vars")
         host_vars = None
         group_vars = None
-        rcode, stdout, stats = self.run_playbook(
+        exitcode, stdout, stats = self.run_playbook(
             config, playbook_path, inventory_path, vault_pass,
             become_pass, remote_pass, verbose, extra_vars, host_vars, group_vars)
         result = self.summarize(stats)
-        metadata = self.metadata(rcode, result)
+        rcode, metadata = self.metadata(exitcode, result)
         timestamp = time.time()
         version = { "timestamp": str(timestamp) }
         rvalue = { "version": version, "metadata": metadata }
