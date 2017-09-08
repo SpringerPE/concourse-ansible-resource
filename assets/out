@@ -211,7 +211,7 @@ class AnsiblePlaybook(Resource):
         inventory = source.get('inventory', {})
         # Fixme! avoid overwriting
         inventory.update(params.get("inventory", {}))
-        hosts = inventory.get("hosts", "localhost")
+        hosts = inventory.get("hosts")
         inventory_path = inventory.get("path", self.DEFAULT_INVENTORY_PATH)
         inventory_file = inventory.get("file")
         inventory_exec = inventory.get("executable")
@@ -238,7 +238,8 @@ class AnsiblePlaybook(Resource):
                 # Just create a inventory file
                 inventory_file = self.DEFAULT_INVENTORY_FILE
                 output = inventory_path
-            self.hosts(hosts, inventory_path, inventory_file)
+            if hosts:
+                self.hosts(hosts, inventory_path, inventory_file)
         return output
 
 
