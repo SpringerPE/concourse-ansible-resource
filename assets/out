@@ -75,6 +75,7 @@ class AnsiblePlaybook(Resource):
     }
     PARAMS = {
         # playbook
+        "src": str,
         "playbook": str,
         "extra_vars": dict,
         "inventory": dict,
@@ -245,6 +246,9 @@ class AnsiblePlaybook(Resource):
         config = self._get_config_param(source, self.SOURCE)
         config_params = self._get_config_param(params, self.PARAMS)
         config.update(config_params)
+        # Path
+        resource_path = config_params.get("src", "src")
+        workfolder = os.path.join(resource_path, workfolder)
         # Extra vars (just a dictionary)
         extra_vars = config.get("extra_vars", {})
         extra_vars.update(source.get("extra_vars", {}))
