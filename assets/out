@@ -364,9 +364,9 @@ class AnsiblePlaybook(Resource):
     def metadata(self, rcode, result):
         if rcode == 0:
             statuscode = 0
-            if len(result.get("failed", [])) > 0:
+            if len(result.get("hosts_failed", [])) > 0:
                 statuscode = 2
-            if len(result.get("unreachable", [])) > 0:
+            if len(result.get("hosts_unreachable", [])) > 0:
                 statuscode = 3
         else:
             statuscode = rcode
