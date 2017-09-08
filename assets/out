@@ -247,8 +247,8 @@ class AnsiblePlaybook(Resource):
         config_params = self._get_config_param(params, self.PARAMS)
         config.update(config_params)
         # Path
-        resource_path = config_params.get("src", "src")
-        workfolder = os.path.join(resource_path, workfolder)
+        build_path = config_params.get("src", "src")
+        build_path = os.path.join(workfolder, build_path)
         # Extra vars (just a dictionary)
         extra_vars = config.get("extra_vars", {})
         extra_vars.update(source.get("extra_vars", {}))
@@ -267,10 +267,10 @@ class AnsiblePlaybook(Resource):
                 self.logger.error(msg)
                 raise
         # Inventory
-        config['inventory'] = self.inventory(workfolder, source, params)
+        config['inventory'] = self.inventory(build_path, source, params)
         # Playbook path
         playbook_path = params.get("playbook", "playbook.yml")
-        playbook_path = os.path.join(workfolder, playbook_path)
+        playbook_path = os.path.join(build_path, playbook_path)
         if not os.path.isfile(playbook_path):
             msg = "Cannot find playbook file '%s'" % (playbook_path)
             self.logger.error(msg)

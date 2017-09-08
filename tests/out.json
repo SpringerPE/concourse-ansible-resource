@@ -1,12 +1,11 @@
 {
   "params": {
     "playbook": "playbook.yml",
-    "verbosity": 5
+    "inventory": {
+      "path": "inventory",
+      "file": "in.ini"
+    }
   },
-  "source": {
-	"inventory": {
-		"hosts": ["localhost"]
-	}
-  }
+  "source": { }
 }
 
