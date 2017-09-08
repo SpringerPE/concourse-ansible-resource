@@ -245,6 +245,7 @@ class AnsiblePlaybook(Resource):
 
     def configure(self, workfolder, source, params):
         config = self._get_config_param(source, self.SOURCE)
+        private_key_path = config.get("private_key_file")
         config_params = self._get_config_param(params, self.PARAMS)
         config.update(config_params)
         # Path
@@ -255,7 +256,6 @@ class AnsiblePlaybook(Resource):
         extra_vars.update(source.get("extra_vars", {}))
         config['extra_vars'] = extra_vars
         # Private key
-        private_key_path = None
         private_key = source.get("private_key")
         if private_key:
             try:
@@ -267,6 +267,9 @@ class AnsiblePlaybook(Resource):
                 msg = "Cannot create private key file: %s" % (str(e))
                 self.logger.error(msg)
                 raise
+            config['private_key_file'] = private_key_path
+        elif private_key_path:
+            config['private_key_file'] = os.path.join(build_path, private_key_path)
         # Inventory
         config['inventory'] = self.inventory(build_path, source, params)
         # Playbook path
