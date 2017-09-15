@@ -3,7 +3,9 @@
 This is [Ansible](https://www.ansible.com) resource for [Concourse](http://concourse.ci)
 to be able to execute Ansible playbooks from concourse.
 
-This a pure Python implementation using the Ansible API. It does not use the binary commands.
+This a pure Python implementation using the Ansible API. It does not use the binary commands
+and it defines an output plugin to send the ansible execution logs to stderr as it is 
+required by concourse (see `ansible/callbacks/concourse.py`).
 
 The ansible default configuration (in `/etc/ansible`) is defined in `ansible` folder.
 
