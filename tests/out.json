@@ -1,11 +1,11 @@
 {
   "params": {
+    "src": ".",
     "playbook": "playbook.yml",
     "inventory": {
       "path": "inventory",
-      "file": "in.ini"
+      "file": "inventory.ini"
     }
   },
   "source": { }
 }
-

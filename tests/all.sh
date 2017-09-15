@@ -42,5 +42,5 @@ export BUILD_TEAM_NAME='main'
 export RESOURCE_DEBUG=1
 
 # TESTS
-test_out simple_playbook out
+test_out playbook.yml out
 
