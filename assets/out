@@ -26,11 +26,9 @@ from resource import Resource
 from ansible.inventory import Inventory
 from ansible.parsing.dataloader import DataLoader
 from ansible.vars import VariableManager
-from ansible.utils.display import Display
 from ansible.executor.playbook_executor import PlaybookExecutor
 from ansible.executor.task_queue_manager import TaskQueueManager
-from ansible.playbook import Playbook
-from ansible.errors import AnsibleError, AnsibleOptionsError
+from ansible.errors import AnsibleError
 from ansible.utils.vars import load_extra_vars, load_options_vars
 from ansible.cli import CLI
 from ansible.utils.display import Display
