@@ -18,9 +18,11 @@ probably you will need to setup `private_key`, `remote_user` and `inventory`:
 * `remote_pass` : If `private_key` is not provided, password for `remote_user`.
 * `vault_password`: Ansible vault password to access to encrypted files with variables.
 * `extra_vars`: Key-value dictionary with variables used in the playbooks.
-* `inventory`: [Ansible inventory definition](http://docs.ansible.com/ansible/latest/dev_guide/developing_inventory.html#script-conventions) specifying the hosts, hosts groups and variables.
-* `inventory_path`: Folder where the hosts inventory file will be created and
-additional inventory files can be defined. Defaults to `inventory`.
+* `inventory`: Dictionary for inventory definition:
+  * `file`: Defaults to `inventory.ini` file name for inventory. 
+  * `path`: Folder where the hosts inventory file will be created (if needed) and additional inventory files can be defined: group_vars and host_vars are. Defaults to `inventory`.
+  * `hosts`: [Ansible inventory definition](http://docs.ansible.com/ansible/latest/dev_guide/developing_inventory.html#script-conventions) specifying the hosts, hosts groups and variables.
+  * `executable`: Path to a dynamic inventory executable.
 * `become`: If true, execute playbooks as `become_user`. Usually not needed at this level.
 * `become_method`: Ansible become method (defaults to `sudo`).
 * `become_user`: User to run for privileged tasks (defaults to `root`).
@@ -48,14 +50,17 @@ and `playbook` (only in `out`).
 
 #### Parameters
 
+* `src`: Base folder where all the ansible resources are (inventory, playbook, ...)
 * `playbook`: Playbook file name to execute.
 * `remote_user`: Remote user used to establish a ssh connection.
 * `remote_pass` : If `private_key` is not provided, password for `remote_user`.
 * `vault_password`: Ansible vault password to access to encrypted files with variables.
 * `extra_vars`: Key-value dictionary with variables used in the playbooks.
-* `inventory`: [Ansible inventory definition](http://docs.ansible.com/ansible/latest/dev_guide/developing_inventory.html#script-conventions) specifying the hosts, hosts groups and variables.
-* `inventory_path`: Folder where the hosts inventory file will be created and
-additional inventory files can be defined. Defaults to `inventory`.
+* `inventory`: Dictionary for inventory definition:
+  * `file`: Defaults to `inventory.ini` file name for inventory. 
+  * `path`: Folder where the hosts inventory file will be created (if needed) and additional inventory files can be defined: group_vars and host_vars are. Defaults to `inventory`.
+  * `hosts`: [Ansible inventory definition](http://docs.ansible.com/ansible/latest/dev_guide/developing_inventory.html#script-conventions) specifying the hosts, hosts groups and variables.
+  * `executable`: Path to a dynamic inventory executable.
 * `become`: If true, execute playbooks as `become_user`. Usually not needed at this level.
 * `become_method`: Ansible become method (defaults to `sudo`).
 * `become_user`: User to run for privileged tasks (defaults to `root`).
@@ -111,7 +116,52 @@ jobs:
   - get: ansible-playbook
   - put: ansible-executor
     params:
+      src: "ansible-playbook"
       playbook: "site.yml"
+```
+
+Another pipeline example:
+
+```
+---
+resource_types:
+- name: ansible
+  type: docker-image
+  source:
+    repository: platformengineering/concourse-ansible-resource
+
+resources:
+- name: ansible-playbook
+  type: git
+  source:
+    uri: git@github.com:springernature/ee-ansible-ironic-standalone.git
+    branch: master
+    private_key: |
+        -----BEGIN RSA PRIVATE KEY-----
+        ..................................................................
+        -----END RSA PRIVATE KEY-----
+
+- name: ansible-executor
+  type: ansible
+  source:
+    private_key: {{ansible-private-key}}
+    remote_user: {{ansible-remote-user}}
+    vault_password: {{ansible-vault-password}}
+
+
+jobs:
+- name: run-ansible
+  plan:
+  - get: ansible-playbook
+    params:
+      submodules: all
+  - put: ansible-executor
+    params:
+      src: "ansible-playbook"
+      inventory:
+        path: "inventory"
+        file: "pe-prod-dogo-ironic-01.ini"
+      playbook: "setup.yml"
 ```
 
 
