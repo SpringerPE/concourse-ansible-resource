@@ -176,7 +176,15 @@ This is an example of a playbook git repository:
 │   ├── static_inventory.ini
 │   └── group_vars
 │       └── group.yml
-└── vars
+├── [roles]
+│   ├── role1
+│   └── role2
+├── [tasks]
+│   ├── task1.yml
+│   └── task1.yml
+├── [files]
+│   └── file.bin
+└── [vars]
     ├── secrets.yml
     └── other_vars.yml
 ```
