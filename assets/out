@@ -22,6 +22,7 @@ except ImportError:
 from resource import Resource
 
 # Future: from ansible.inventory.manager import InventoryManager
+# from ansible.executor.stats import AggregateStats
 from ansible.inventory import Inventory
 from ansible.parsing.dataloader import DataLoader
 from ansible.vars import VariableManager
@@ -29,33 +30,142 @@ from ansible.utils.display import Display
 from ansible.executor.playbook_executor import PlaybookExecutor
 from ansible.executor.task_queue_manager import TaskQueueManager
 from ansible.playbook import Playbook
-from ansible.errors import AnsibleError
-# from ansible.executor.stats import AggregateStats
+from ansible.errors import AnsibleError, AnsibleOptionsError
+from ansible.utils.vars import load_extra_vars, load_options_vars
+from ansible.cli import CLI
+from ansible.utils.display import Display
+display = Display()
+
+
+
+class PlaybookCLI(CLI):
+    DEFAULTS = {
+        'subset': None,
+        'ask_pass': False,
+        'ask_vault_pass': False,
+        'become': False,
+        'become_ask_pass': False,
+        'become_user': 'root',
+        'become_method': 'sudo',
+        'become_pass': None,
+        'check': False,
+        'connection': 'smart',
+        'diff': False,
+        'extra_vars': [],
+        'flush_cache': False,
+        'force_handlers': False,
+        'forks': 5,
+        'inventory': None,
+        'listhosts': False,
+        'listtags': False,
+        'listtasks': False,
+        'module_path': None,
+        'new_vault_password_file': None,
+        'output_file': None,
+        'private_key_file': None,
+        'remote_user': 'root',
+        'remote_pass': None,
+        'scp_extra_args': '',
+        'sftp_extra_args': '',
+        'skip_tags': [],
+        'ssh_common_args': '',
+        'ssh_extra_args': '',
+        'start_at_task': None,
+        'step': None,
+        'syntax': False, # None
+        'tags': ['all'],
+        'timeout': 10,
+        'vault_password': None,
+        'vault_password_file': None,
+        'verbosity': 0,
+    }
+
+    def __init__(self, config, logger):
+        super(self.__class__, self).__init__({})
+        self.logger = logger
+        options = dict(self.DEFAULTS)
+        options.update(config)
+        #del options_all['private_key_file']
+        #del options_all['module_path']
+        #  Convert dicitionary to namedtuple 'Options'
+        self.options = namedtuple('Options', options.keys())(**options)
+        display.verbosity = self.options.verbosity
+
+    def parse(self):
+        pass
+
+    def run(self):
+        rcode = 0
+        playbook_path = self.options.playbook
+        inventory_path = self.options.inventory
+        verbose = self.options.verbosity
+        vault_password = self.options.vault_password
+        become_password = self.options.become_pass
+        remote_password = self.options.remote_pass
+        extra_vars = self.options.extra_vars
+        host_vars = None
+        group_vars = None
+        passwords = {}
+        # Set global verbosity
+        PlaybookExecutor.verbosity = verbose
+        super(self.__class__, self).run()
+        # Gets data from YAML/JSON files
+        loader = DataLoader()
+        if vault_password:
+            loader.set_vault_password(vault_password)
+        # Ansible 2.4
+        #
+        #inventory = InventoryManager(loader, inventory_path)
+        #variable_manager = VariableManager(loader=loader, inventory=inventory)
+        #
+        # Ansible 2.3.x
+        variable_manager = VariableManager()
+        if extra_vars:
+            variable_manager.extra_vars = load_extra_vars(loader=loader, options=extra_vars)
+        variable_manager.options_vars = load_options_vars(self.options)
+        if host_vars:
+            variable_manager.host_vars_files = host_vars
+        if group_vars:
+            variable_manager.group_vars_files = group_vars
+        inventory = Inventory(loader, variable_manager, inventory_path)
+        variable_manager.set_inventory(inventory)
+        # End Ansible
+        if become_password is not None:
+            passwords['become_pass'] = become_password
+        if remote_password is not None:
+            passwords['conn_pass'] = remote_password
+        self.logger.info("Running playbook '%s': %s" % (playbook_path, self.options))
+        # flush fact cache if requested
+        if self.options.flush_cache:
+            for host in inventory.list_hosts():
+                hostname = host.get_name()
+                variable_manager.clear_facts(hostname)
+        # Setup playbook executor, but don't run until run() called
+        playbook = PlaybookExecutor(
+            playbooks = [playbook_path], 
+            inventory = inventory, 
+            variable_manager = variable_manager,
+            loader = loader, 
+            options = self.options, 
+            passwords = passwords
+        )
+        # Results of PlaybookExecutor
+        stdout = ""
+        try:
+            stdout = playbook.run()
+        except AnsibleError as e:
+            msg = "Error running playbook '%s': %s" % (playbook_path, str(e))
+            self.logger.error(msg)
+            rcode = 1
+        else:
+            self.logger.info("Done '%s'" % (playbook_path))
+        stats = playbook._tqm._stats
+        return rcode, stdout, stats
 
 
 
 class AnsiblePlaybook(Resource):
     """Concourse resource implementation for ansible-playbook"""
-    DEFAULTS = {
-        'listtags': False,
-        'listtasks': False,
-        'listhosts': False,
-        'syntax': False,
-        'connection': None,
-        'module_path': None,
-        'forks': None,
-        'remote_user': None,
-        'private_key_file': None,
-        'ssh_common_args': None,
-        'ssh_extra_args': None,
-        'sftp_extra_args': None,
-        'scp_extra_args': None,
-        'become': None,
-        'become_method': None,
-        'become_user': None,
-        'verbosity': 0,
-        'check': 0,
-    }
     SOURCE = {
         # private_key
         "private_key_file": str,
@@ -97,7 +207,7 @@ class AnsiblePlaybook(Resource):
 
 
     def __init__(self, *args, **kwargs):
-        super(AnsiblePlaybook, self).__init__(*args, **kwargs)
+        super(self.__class__, self).__init__(*args, **kwargs)
 
 
     def _get_config_param(self, data, params={}):
@@ -283,62 +393,6 @@ class AnsiblePlaybook(Resource):
         return config
 
 
-    def run_playbook(self, config, playbook_path, inventory_path,
-                     vault_password=None, become_password=None, remote_pass=None,
-                     verbose=0, extra_vars=None, host_vars=None, group_vars=None):
-        rcode = 0
-        # Set global verbosity
-        PlaybookExecutor.verbosity = verbose
-        # Gets data from YAML/JSON files
-        loader = DataLoader()
-        if vault_password:
-            loader.set_vault_password(vault_password)
-        # Future! (for new ansible versions, not yet released)
-        #inventory = InventoryManager(loader, inventory_path)
-        #variable_manager = VariableManager(loader=loader, inventory=inventory)
-        # For ansible 2.3.x
-        variable_manager = VariableManager()
-        inventory = Inventory(loader, variable_manager, inventory_path)
-        variable_manager.set_inventory(inventory)
-        if extra_vars:
-            variable_manager.extra_vars = extra_vars
-        if host_vars:
-            variable_manager.host_vars_files = host_vars
-        if group_vars:
-            variable_manager.group_vars_files = group_vars
-        # Convert dicitionary to namedtuple 'Options'
-        options_all = dict(self.DEFAULTS)
-        options_all.update(config)
-        #del options_all['private_key_file']
-        #del options_all['module_path']
-        options = namedtuple('Options', options_all.keys())(**options_all)
-        passwords = {}
-        if become_password is not None:
-            passwords['become_pass'] = become_password
-        if remote_pass is not None:
-            passwords['conn_pass'] = remote_pass
-        self.logger.info("Running playbook '%s': %s" % (playbook_path, options))
-        # Setup playbook executor, but don't run until run() called
-        playbook = PlaybookExecutor(
-            playbooks = [playbook_path], 
-            inventory = inventory, 
-            variable_manager = variable_manager,
-            loader = loader, 
-            options = options, 
-            passwords = passwords
-        )
-        # Results of PlaybookExecutor
-        stdout = ""
-        try:
-            stdout = playbook.run()
-        except AnsibleError as e:
-            msg = "Error running playbook '%s': %s" % (playbook_path, str(e))
-            self.logger.error(msg)
-            rcode = 1
-        stats = playbook._tqm._stats
-        return rcode, stdout, stats
-
-
     def summarize(self, stats):
         failed = []
         unreachable = []
@@ -382,18 +436,7 @@ class AnsiblePlaybook(Resource):
 
     def update(self, folder, source, params):
         config = self.configure(folder, source, params)
-        playbook_path = config["playbook"]
-        inventory_path = config["inventory"]
-        verbose = config.get("verbosity", 0)
-        vault_pass = config.get("vault_password")
-        become_pass = config.get("become_pass")
-        remote_pass = config.get("remote_pass")
-        extra_vars = config.get("extra_vars")
-        host_vars = None
-        group_vars = None
-        exitcode, stdout, stats = self.run_playbook(
-            config, playbook_path, inventory_path, vault_pass,
-            become_pass, remote_pass, verbose, extra_vars, host_vars, group_vars)
+        exitcode, stdout, stats = PlaybookCLI(config, self.logger).run()
         result = self.summarize(stats)
         rcode, metadata = self.metadata(exitcode, result)
         timestamp = time.time()
