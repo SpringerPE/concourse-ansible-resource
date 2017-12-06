@@ -6,7 +6,7 @@ dopy==0.3.7
 pysphere==0.1.7
 python-consul==0.7.1
 f5-sdk==2.3.3
-bigsuds==1.0.4
+bigsuds==1.0.6
 netaddr==0.7.19
 boto==2.48.0
 azure==2.0.0
