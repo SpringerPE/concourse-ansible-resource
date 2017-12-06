@@ -119,7 +119,7 @@ class PlaybookCLI(CLI):
         # Ansible 2.3.x
         variable_manager = VariableManager()
         if extra_vars:
-            variable_manager.extra_vars = load_extra_vars(loader=loader, options=extra_vars)
+            variable_manager.extra_vars = load_extra_vars(loader=loader, options=self.options)
         variable_manager.options_vars = load_options_vars(self.options)
         if host_vars:
             variable_manager.host_vars_files = host_vars
@@ -362,7 +362,7 @@ class AnsiblePlaybook(Resource):
         # Extra vars (just a dictionary)
         extra_vars = config.get("extra_vars", {})
         extra_vars.update(source.get("extra_vars", {}))
-        config['extra_vars'] = extra_vars
+        config['extra_vars'] = [extra_vars]
         # Private key
         private_key = source.get("private_key")
         if private_key:

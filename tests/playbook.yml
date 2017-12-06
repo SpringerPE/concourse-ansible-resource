@@ -12,3 +12,11 @@
 
   - name: ping2
     ping:
+
+  - name: print var1
+    debug:
+      var: var1
+
+  - name: print var2
+    debug:
+      var: var2
