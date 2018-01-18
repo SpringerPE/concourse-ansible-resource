@@ -5,6 +5,10 @@
     "inventory": {
       "path": "inventory",
       "file": "inventory.ini"
+    },
+    "extra_vars": {
+      "var1": "hello, world!",
+      "var2": 42
     }
   },
   "source": { }
