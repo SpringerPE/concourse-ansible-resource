@@ -10,6 +10,8 @@ import sys
 import os
 import time
 
+from git import Repo
+
 from collections import namedtuple, defaultdict
 from tempfile import NamedTemporaryFile
 try:
@@ -356,9 +358,20 @@ class AnsiblePlaybook(Resource):
         private_key_path = config.get("private_key_file")
         config_params = self._get_config_param(params, self.PARAMS)
         config.update(config_params)
+
         # Path
-        build_path = config_params.get("src", "src")
-        build_path = os.path.join(workfolder, build_path)
+        build_path = config_params.get("src")
+        if (build_path):
+            build_path = os.path.join(workfolder, build_path)
+        else:
+            build_path = os.path.join(workfolder, "src")
+            git_ssh_identity_filename = os.path.expanduser("~/.ssh/id_rsa")
+            git_ssh_identity_file = open(git_ssh_identity_filename, "w")
+            git_ssh_identity_file.write(source.get("src_private_key"))
+            git_ssh_identity_file.close()
+            os.chmod(git_ssh_identity_filename, 0o600)
+            Repo.clone_from(source.get("src_uri"), build_path, branch=source.get("src_branch", "master"))
+
         # Extra vars (just a dictionary)
         extra_vars = config.get("extra_vars", {})
         extra_vars.update(source.get("extra_vars", {}))
