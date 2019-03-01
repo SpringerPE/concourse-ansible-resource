@@ -24,6 +24,7 @@ RUN ln -s /lib /lib64 \
             ca-certificates \
             openssh-client \
             rsync \
+            git \
     && \
         apk --upgrade add --no-cache --virtual \
             build-dependencies \
@@ -48,6 +49,10 @@ RUN apk del \
         libxml2-dev \
     && \
         rm -rf /var/cache/apk/*
+
+RUN mkdir -p ~/.ssh
+RUN echo $'Host *\nStrictHostKeyChecking no' > ~/.ssh/config
+RUN chmod 400 ~/.ssh/config
 
 # Default config
 COPY ansible/ /etc/ansible/

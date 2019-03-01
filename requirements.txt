@@ -21,3 +21,5 @@ zabbix-api==0.4
 
 cfconfigurator>=0.2.4
 bosh_inventory>=0.2.2
+
+gitpython
