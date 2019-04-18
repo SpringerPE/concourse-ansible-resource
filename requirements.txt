@@ -1,4 +1,4 @@
-ansible==2.3.2.0
+ansible==2.6.2
 
 awscli==1.11.131
 pywinrm==0.2.2
